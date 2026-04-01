@@ -5,6 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { THEMES } from '../../../shared/themes';
 import type { TerminalEngineHandle, TerminalEngineProps } from '../../../renderer/types';
 
+interface MockLinkProvider {
+	provideLinks: ReturnType<typeof vi.fn>;
+	dispose?: ReturnType<typeof vi.fn>;
+}
+
 interface MockTerminalInstance {
 	options: {
 		fontFamily: string;
@@ -19,6 +24,8 @@ interface MockTerminalInstance {
 	dispose: ReturnType<typeof vi.fn>;
 	getSelection: ReturnType<typeof vi.fn>;
 	loadAddon: ReturnType<typeof vi.fn>;
+	registerLinkProvider: ReturnType<typeof vi.fn>;
+	registeredProviders: MockLinkProvider[];
 	emitData: (data: string) => void;
 	emitResize: (size: { cols: number; rows: number }) => void;
 	emitTitleChange: (title: string) => void;
@@ -30,10 +37,17 @@ interface MockFitAddonInstance {
 	nextDimensions: { cols: number; rows: number };
 }
 
+interface MockProviderInstance {
+	provideLinks: ReturnType<typeof vi.fn>;
+	dispose: ReturnType<typeof vi.fn>;
+}
+
 const ghosttyMockState = vi.hoisted(() => ({
 	initMock: vi.fn(),
 	terminalInstances: [] as MockTerminalInstance[],
 	fitAddonInstances: [] as MockFitAddonInstance[],
+	urlRegexProviderInstances: [] as MockProviderInstance[],
+	osc8ProviderInstances: [] as MockProviderInstance[],
 }));
 
 const sentryMockState = vi.hoisted(() => ({
@@ -67,6 +81,7 @@ vi.mock('ghostty-web', () => {
 		dataListeners: Array<(data: string) => void> = [];
 		resizeListeners: Array<(size: { cols: number; rows: number }) => void> = [];
 		titleListeners: Array<(title: string) => void> = [];
+		registeredProviders: MockLinkProvider[] = [];
 		open = vi.fn();
 		write = vi.fn();
 		focus = vi.fn();
@@ -76,6 +91,9 @@ vi.mock('ghostty-web', () => {
 		getSelection = vi.fn(() => 'selected text');
 		loadAddon = vi.fn((addon: MockFitAddon) => {
 			addon.activate(this);
+		});
+		registerLinkProvider = vi.fn((provider: MockLinkProvider) => {
+			this.registeredProviders.push(provider);
 		});
 
 		constructor(options?: {
@@ -138,10 +156,36 @@ vi.mock('ghostty-web', () => {
 		}
 	}
 
+	class MockUrlRegexProvider {
+		terminal: MockTerminal;
+		provideLinks = vi.fn((_y: number, callback: (links: unknown[] | undefined) => void) => {
+			callback(undefined);
+		});
+		dispose = vi.fn();
+		constructor(terminal: MockTerminal) {
+			this.terminal = terminal;
+			ghosttyMockState.urlRegexProviderInstances.push(this as unknown as MockProviderInstance);
+		}
+	}
+
+	class MockOSC8LinkProvider {
+		terminal: MockTerminal;
+		provideLinks = vi.fn((_y: number, callback: (links: unknown[] | undefined) => void) => {
+			callback(undefined);
+		});
+		dispose = vi.fn();
+		constructor(terminal: MockTerminal) {
+			this.terminal = terminal;
+			ghosttyMockState.osc8ProviderInstances.push(this as unknown as MockProviderInstance);
+		}
+	}
+
 	return {
 		init: ghosttyMockState.initMock,
 		Terminal: MockTerminal,
 		FitAddon: MockFitAddon,
+		UrlRegexProvider: MockUrlRegexProvider,
+		OSC8LinkProvider: MockOSC8LinkProvider,
 	};
 });
 
@@ -159,6 +203,8 @@ describe('GhosttyTerminal', () => {
 		ghosttyMockState.initMock.mockReset().mockResolvedValue(undefined);
 		ghosttyMockState.terminalInstances.length = 0;
 		ghosttyMockState.fitAddonInstances.length = 0;
+		ghosttyMockState.urlRegexProviderInstances.length = 0;
+		ghosttyMockState.osc8ProviderInstances.length = 0;
 		sentryMockState.captureExceptionMock.mockReset();
 		processDataHandler = null;
 
@@ -442,6 +488,102 @@ describe('GhosttyTerminal', () => {
 			expect(terminal.options.theme.cyan).toBe(lightTheme.colors.accentText);
 			// Light mode: brightCyan maps to textMain, not accentText
 			expect(terminal.options.theme.brightCyan).toBe(lightTheme.colors.textMain);
+		});
+	});
+
+	describe('link detection', () => {
+		it('registers both URL regex and OSC 8 link providers after open()', async () => {
+			renderComponent();
+
+			await waitFor(() => {
+				expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+			});
+
+			const terminal = ghosttyMockState.terminalInstances[0];
+
+			expect(terminal.registerLinkProvider).toHaveBeenCalledTimes(2);
+			expect(terminal.registeredProviders).toHaveLength(2);
+		});
+
+		it('passes through undefined when the inner provider detects no links', async () => {
+			renderComponent();
+
+			await waitFor(() => {
+				expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+			});
+
+			const terminal = ghosttyMockState.terminalInstances[0];
+			const wrappedUrlProvider = terminal.registeredProviders[0];
+
+			let callbackResult: unknown = 'not-called';
+			wrappedUrlProvider.provideLinks(0, (links: unknown) => {
+				callbackResult = links;
+			});
+			expect(callbackResult).toBeUndefined();
+		});
+
+		it('opens links via window.maestro.shell.openExternal when activated', async () => {
+			const openExternalMock = window.maestro.shell.openExternal as ReturnType<typeof vi.fn>;
+			openExternalMock.mockReset().mockResolvedValue(undefined);
+
+			// Make the inner UrlRegexProvider return a link
+			const fakeLink = {
+				text: 'https://example.com/page',
+				range: { start: { x: 0, y: 0 }, end: { x: 23, y: 0 } },
+				activate: vi.fn(),
+			};
+
+			renderComponent();
+
+			await waitFor(() => {
+				expect(ghosttyMockState.urlRegexProviderInstances).toHaveLength(1);
+			});
+
+			// Override the inner mock to return our fake link
+			const innerProvider = ghosttyMockState.urlRegexProviderInstances[0];
+			innerProvider.provideLinks.mockImplementation(
+				(_y: number, callback: (links: unknown[] | undefined) => void) => {
+					callback([fakeLink]);
+				}
+			);
+
+			const terminal = ghosttyMockState.terminalInstances[0];
+			const wrappedUrlProvider = terminal.registeredProviders[0];
+
+			let wrappedLinks: Array<{ text: string; activate: (event: MouseEvent) => void }> = [];
+			wrappedUrlProvider.provideLinks(0, (links: unknown) => {
+				wrappedLinks = links as typeof wrappedLinks;
+			});
+
+			expect(wrappedLinks).toHaveLength(1);
+			expect(wrappedLinks[0].text).toBe('https://example.com/page');
+
+			// Activate the link — should call openExternal, NOT window.open
+			wrappedLinks[0].activate(new MouseEvent('click'));
+
+			expect(openExternalMock).toHaveBeenCalledWith('https://example.com/page');
+			// The original activate from the built-in provider should NOT be called
+			expect(fakeLink.activate).not.toHaveBeenCalled();
+		});
+
+		it('disposes the inner provider when the wrapper is disposed', async () => {
+			renderComponent();
+
+			await waitFor(() => {
+				expect(ghosttyMockState.urlRegexProviderInstances).toHaveLength(1);
+			});
+
+			const innerUrlProvider = ghosttyMockState.urlRegexProviderInstances[0];
+			const innerOsc8Provider = ghosttyMockState.osc8ProviderInstances[0];
+
+			const terminal = ghosttyMockState.terminalInstances[0];
+
+			// Call dispose on wrapped providers
+			terminal.registeredProviders[0].dispose?.();
+			terminal.registeredProviders[1].dispose?.();
+
+			expect(innerUrlProvider.dispose).toHaveBeenCalledTimes(1);
+			expect(innerOsc8Provider.dispose).toHaveBeenCalledTimes(1);
 		});
 	});
 

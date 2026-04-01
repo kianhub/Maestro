@@ -1,4 +1,4 @@
-import React, {
+import {
 	forwardRef,
 	useCallback,
 	useEffect,
@@ -6,7 +6,16 @@ import React, {
 	useRef,
 	useState,
 } from 'react';
-import { FitAddon, Terminal, init, type ITheme as GhosttyTheme } from 'ghostty-web';
+import {
+	FitAddon,
+	OSC8LinkProvider,
+	Terminal,
+	UrlRegexProvider,
+	init,
+	type ILink,
+	type ILinkProvider,
+	type ITheme as GhosttyTheme,
+} from 'ghostty-web';
 
 import type { Theme } from '../../shared/theme-types';
 import type { TerminalEngineHandle, TerminalEngineProps } from '../types/terminalEngine';
@@ -29,6 +38,37 @@ function ensureGhosttyInitialized(): Promise<void> {
 	}
 
 	return ghosttyInitPromise;
+}
+
+/**
+ * Wraps a link provider so that link activation uses Maestro's IPC bridge
+ * (`window.maestro.shell.openExternal`) instead of `window.open`, which
+ * does not work correctly inside Electron.
+ */
+function wrapLinkProvider(provider: ILinkProvider): ILinkProvider {
+	return {
+		provideLinks(y: number, callback: (links: ILink[] | undefined) => void) {
+			provider.provideLinks(y, (links) => {
+				if (!links) {
+					callback(undefined);
+					return;
+				}
+
+				const wrapped = links.map((link) => ({
+					...link,
+					activate(_event: MouseEvent) {
+						if (link.text) {
+							void window.maestro.shell.openExternal(link.text);
+						}
+					},
+				}));
+				callback(wrapped);
+			});
+		},
+		dispose() {
+			provider.dispose?.();
+		},
+	};
 }
 
 function isContainerVisible(container: HTMLElement | null): container is HTMLElement {
@@ -167,6 +207,18 @@ export const GhosttyTerminal = forwardRef<TerminalEngineHandle, TerminalEnginePr
 
 					terminal.loadAddon(fitAddon);
 					terminal.open(containerRef.current);
+
+					// Register link providers so URLs and OSC 8 hyperlinks are
+					// clickable. The built-in providers use window.open() which
+					// doesn't work in Electron, so we wrap them to route through
+					// Maestro's IPC bridge instead.
+					terminal.registerLinkProvider(
+						wrapLinkProvider(new UrlRegexProvider(terminal))
+					);
+					terminal.registerLinkProvider(
+						wrapLinkProvider(new OSC8LinkProvider(terminal))
+					);
+
 					fitAddon.observeResize();
 
 					unsubscribeProcessData = window.maestro.process.onData((incomingSessionId, data) => {
