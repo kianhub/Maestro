@@ -2,6 +2,7 @@
 
 // Re-export context merge types
 export * from './contextMerge';
+export type { TerminalEngineHandle, TerminalEngineProps } from './terminalEngine';
 
 // Re-export theme types from shared location
 export type { Theme, ThemeId, ThemeMode, ThemeColors } from '../../shared/theme-types';
