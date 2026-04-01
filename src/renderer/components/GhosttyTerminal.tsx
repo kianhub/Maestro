@@ -6,6 +6,12 @@ import {
 	useRef,
 	useState,
 } from 'react';
+// ghostty-web v0.4.0 embeds the full ghostty-vt.wasm (423 KB) as a base64 data
+// URL inside its JavaScript bundle. No separate .wasm file is emitted during
+// build, and no Vite WASM plugin (e.g. vite-plugin-wasm) is required. When this
+// module is lazy-loaded via React.lazy, Vite code-splits it into its own chunk
+// that carries the inlined WASM. Verified with `npm run build` and `npm run dev`
+// on 2026-04-01 against ghostty-web 0.4.0.
 import {
 	FitAddon,
 	OSC8LinkProvider,
