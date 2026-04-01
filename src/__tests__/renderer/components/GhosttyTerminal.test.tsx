@@ -322,4 +322,126 @@ describe('GhosttyTerminal', () => {
 
 		expect(terminal.dispose).toHaveBeenCalledTimes(1);
 	});
+
+	describe('theme hot-reloading', () => {
+		it('applies a dark theme update via options.theme without disposing the terminal', async () => {
+			const ref = React.createRef<TerminalEngineHandle>();
+			const { rerender } = render(
+				<GhosttyTerminal
+					ref={ref}
+					sessionId="session-1"
+					theme={THEMES.dracula}
+					fontFamily="JetBrains Mono"
+					fontSize={14}
+				/>
+			);
+
+			await waitFor(() => {
+				expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+			});
+
+			const terminal = ghosttyMockState.terminalInstances[0];
+			const initialTheme = { ...terminal.options.theme };
+
+			// Switch to a different dark theme (Tokyo Night)
+			rerender(
+				<GhosttyTerminal
+					ref={ref}
+					sessionId="session-1"
+					theme={THEMES['tokyo-night']}
+					fontFamily="JetBrains Mono"
+					fontSize={14}
+				/>
+			);
+
+			// Theme should update in-place
+			expect(terminal.options.theme).not.toEqual(initialTheme);
+			expect(terminal.options.theme.background).toBe(THEMES['tokyo-night'].colors.bgMain);
+			expect(terminal.options.theme.foreground).toBe(THEMES['tokyo-night'].colors.textMain);
+
+			// Terminal must NOT be disposed and re-created
+			expect(terminal.dispose).not.toHaveBeenCalled();
+			expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+		});
+
+		it('applies a light theme update without disposing the terminal', async () => {
+			const ref = React.createRef<TerminalEngineHandle>();
+			const { rerender } = render(
+				<GhosttyTerminal
+					ref={ref}
+					sessionId="session-1"
+					theme={THEMES.dracula}
+					fontFamily="JetBrains Mono"
+					fontSize={14}
+				/>
+			);
+
+			await waitFor(() => {
+				expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+			});
+
+			const terminal = ghosttyMockState.terminalInstances[0];
+
+			// Switch from dark (Dracula) to light (GitHub Light)
+			rerender(
+				<GhosttyTerminal
+					ref={ref}
+					sessionId="session-1"
+					theme={THEMES['github-light']}
+					fontFamily="JetBrains Mono"
+					fontSize={14}
+				/>
+			);
+
+			expect(terminal.options.theme.background).toBe(THEMES['github-light'].colors.bgMain);
+			expect(terminal.options.theme.foreground).toBe(THEMES['github-light'].colors.textMain);
+			expect(terminal.options.theme.cursor).toBe(THEMES['github-light'].colors.accent);
+
+			// Still the same terminal instance — no dispose/re-create
+			expect(terminal.dispose).not.toHaveBeenCalled();
+			expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+		});
+
+		it('correctly maps light-mode-specific ANSI colors', async () => {
+			const ref = React.createRef<TerminalEngineHandle>();
+			const { rerender } = render(
+				<GhosttyTerminal
+					ref={ref}
+					sessionId="session-1"
+					theme={THEMES.dracula}
+					fontFamily="JetBrains Mono"
+					fontSize={14}
+				/>
+			);
+
+			await waitFor(() => {
+				expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+			});
+
+			const terminal = ghosttyMockState.terminalInstances[0];
+
+			// Switch to light theme — mapThemeToGhostty uses mode-specific logic
+			// for black, cyan, white, and brightCyan
+			rerender(
+				<GhosttyTerminal
+					ref={ref}
+					sessionId="session-1"
+					theme={THEMES['github-light']}
+					fontFamily="JetBrains Mono"
+					fontSize={14}
+				/>
+			);
+
+			const lightTheme = THEMES['github-light'];
+
+			// Light mode: black maps to textDim, not bgSidebar
+			expect(terminal.options.theme.black).toBe(lightTheme.colors.textDim);
+			// Light mode: white maps to bgActivity, not textDim
+			expect(terminal.options.theme.white).toBe(lightTheme.colors.bgActivity);
+			// Light mode: cyan maps to accentText, not textDim
+			expect(terminal.options.theme.cyan).toBe(lightTheme.colors.accentText);
+			// Light mode: brightCyan maps to textMain, not accentText
+			expect(terminal.options.theme.brightCyan).toBe(lightTheme.colors.textMain);
+		});
+	});
 });

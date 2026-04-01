@@ -209,6 +209,12 @@ export const GhosttyTerminal = forwardRef<TerminalEngineHandle, TerminalEnginePr
 			};
 		}, [fitTerminalToContainer, sessionId]);
 
+		// Best-effort runtime theme update. ghostty-web 0.4.0 warns that theme
+		// changes after open() are "not yet fully supported" — some palette
+		// entries may not repaint until new content is written. We intentionally
+		// avoid disposing/re-creating the terminal here because that would wipe
+		// the in-memory scrollback buffer for an active PTY tab. New terminal
+		// tabs always pick up the current theme in full via the constructor.
 		useEffect(() => {
 			if (!terminalRef.current) return;
 
