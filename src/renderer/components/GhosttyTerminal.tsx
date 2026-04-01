@@ -19,6 +19,7 @@ import {
 
 import type { Theme } from '../../shared/theme-types';
 import type { TerminalEngineHandle, TerminalEngineProps } from '../types/terminalEngine';
+import { isMacOSPlatform } from '../utils/platformUtils';
 import { captureException } from '../utils/sentry';
 
 const DEFAULT_FONT_SIZE = 14;
@@ -69,6 +70,62 @@ function wrapLinkProvider(provider: ILinkProvider): ILinkProvider {
 			provider.dispose?.();
 		},
 	};
+}
+
+/**
+ * Word-navigation escape sequences sent for Option+Arrow on macOS.
+ * ESC b = backward-word, ESC f = forward-word (readline / zsh defaults).
+ */
+const WORD_LEFT = '\x1bb';
+const WORD_RIGHT = '\x1bf';
+
+/**
+ * Evaluate a keyboard event fired inside the Ghostty terminal.
+ *
+ * Return semantics match ghostty-web's `attachCustomKeyEventHandler`:
+ *   `true`  → prevent Ghostty from handling the key (pass to window / write manually)
+ *   `false` → let Ghostty process the key normally
+ *
+ * The logic mirrors what xterm.js consumers typically do with
+ * `attachCustomKeyEventHandler` / `evaluateCustomKeyEvent`, adapted for
+ * Ghostty's inverted return convention.
+ */
+function evaluateKeyEvent(event: KeyboardEvent, sessionId: string): boolean {
+	const isMac = isMacOSPlatform();
+
+	// ── Maestro app shortcuts (Cmd+key / Ctrl+key on non-Mac) ──
+	// On macOS Cmd (metaKey) is *never* a terminal control sequence, so pass
+	// every Cmd-chord through to the window-level handler.
+	if (isMac && event.metaKey) {
+		return true;
+	}
+
+	// On non-macOS, Ctrl is used both for terminal control (Ctrl+C) and app
+	// shortcuts (Ctrl+T). The convention: Ctrl+Shift is always a Maestro
+	// shortcut, and Meta (Windows/Super key) combos are also Maestro shortcuts.
+	if (!isMac) {
+		if (event.metaKey) return true;
+		if (event.ctrlKey && event.shiftKey) return true;
+		if (event.ctrlKey && event.altKey) return true;
+	}
+
+	// ── Option+Arrow word navigation (macOS) ──
+	// macOS terminals translate Option+Left/Right into backward/forward-word
+	// escape sequences. Ghostty may not emit these for the host PTY, so we
+	// write them manually and tell Ghostty to ignore the keypress.
+	if (isMac && event.altKey && !event.metaKey && !event.ctrlKey) {
+		if (event.key === 'ArrowLeft') {
+			void window.maestro.process.write(sessionId, WORD_LEFT);
+			return true;
+		}
+		if (event.key === 'ArrowRight') {
+			void window.maestro.process.write(sessionId, WORD_RIGHT);
+			return true;
+		}
+	}
+
+	// ── Everything else → normal terminal input ──
+	return false;
 }
 
 function isContainerVisible(container: HTMLElement | null): container is HTMLElement {
@@ -207,6 +264,13 @@ export const GhosttyTerminal = forwardRef<TerminalEngineHandle, TerminalEnginePr
 
 					terminal.loadAddon(fitAddon);
 					terminal.open(containerRef.current);
+
+					// Intercept keyboard events so Maestro app shortcuts
+					// (Cmd+T, Cmd+K, etc.) bubble to the window-level handler
+					// instead of being consumed by the terminal.
+					terminal.attachCustomKeyEventHandler((event) =>
+						evaluateKeyEvent(event, sessionId)
+					);
 
 					// Register link providers so URLs and OSC 8 hyperlinks are
 					// clickable. The built-in providers use window.open() which

@@ -25,6 +25,8 @@ interface MockTerminalInstance {
 	getSelection: ReturnType<typeof vi.fn>;
 	loadAddon: ReturnType<typeof vi.fn>;
 	registerLinkProvider: ReturnType<typeof vi.fn>;
+	attachCustomKeyEventHandler: ReturnType<typeof vi.fn>;
+	customKeyEventHandler: ((event: KeyboardEvent) => boolean) | null;
 	registeredProviders: MockLinkProvider[];
 	emitData: (data: string) => void;
 	emitResize: (size: { cols: number; rows: number }) => void;
@@ -82,6 +84,7 @@ vi.mock('ghostty-web', () => {
 		resizeListeners: Array<(size: { cols: number; rows: number }) => void> = [];
 		titleListeners: Array<(title: string) => void> = [];
 		registeredProviders: MockLinkProvider[] = [];
+		customKeyEventHandler: ((event: KeyboardEvent) => boolean) | null = null;
 		open = vi.fn();
 		write = vi.fn();
 		focus = vi.fn();
@@ -94,6 +97,9 @@ vi.mock('ghostty-web', () => {
 		});
 		registerLinkProvider = vi.fn((provider: MockLinkProvider) => {
 			this.registeredProviders.push(provider);
+		});
+		attachCustomKeyEventHandler = vi.fn((handler: (event: KeyboardEvent) => boolean) => {
+			this.customKeyEventHandler = handler;
 		});
 
 		constructor(options?: {
@@ -645,6 +651,194 @@ describe('GhosttyTerminal', () => {
 			expect(infoSpy).toHaveBeenCalledTimes(1);
 
 			infoSpy.mockRestore();
+		});
+	});
+
+	describe('keyboard shortcut passthrough', () => {
+		/** Helper to create a KeyboardEvent-like object for the custom key handler. */
+		function makeKeyEvent(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
+			return {
+				key: '',
+				code: '',
+				metaKey: false,
+				ctrlKey: false,
+				altKey: false,
+				shiftKey: false,
+				...overrides,
+			} as unknown as KeyboardEvent;
+		}
+
+		it('registers a custom key event handler after open()', async () => {
+			renderComponent();
+
+			await waitFor(() => {
+				expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+			});
+
+			const terminal = ghosttyMockState.terminalInstances[0];
+			expect(terminal.attachCustomKeyEventHandler).toHaveBeenCalledTimes(1);
+			expect(terminal.customKeyEventHandler).toBeTypeOf('function');
+		});
+
+		describe('macOS (Cmd shortcuts)', () => {
+			beforeEach(() => {
+				(window as any).maestro.platform = 'darwin';
+			});
+
+			it('returns true for Cmd+T (pass through to Maestro)', async () => {
+				renderComponent();
+
+				await waitFor(() => {
+					expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+				});
+
+				const handler = ghosttyMockState.terminalInstances[0].customKeyEventHandler!;
+				const result = handler(makeKeyEvent({ key: 't', metaKey: true }));
+				expect(result).toBe(true);
+			});
+
+			it('returns true for Cmd+K (quick actions)', async () => {
+				renderComponent();
+
+				await waitFor(() => {
+					expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+				});
+
+				const handler = ghosttyMockState.terminalInstances[0].customKeyEventHandler!;
+				expect(handler(makeKeyEvent({ key: 'k', metaKey: true }))).toBe(true);
+			});
+
+			it('returns true for Cmd+Shift+[ (cycle previous)', async () => {
+				renderComponent();
+
+				await waitFor(() => {
+					expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+				});
+
+				const handler = ghosttyMockState.terminalInstances[0].customKeyEventHandler!;
+				expect(handler(makeKeyEvent({ key: '[', metaKey: true, shiftKey: true }))).toBe(true);
+			});
+
+			it('returns false for normal letter keys (terminal handles)', async () => {
+				renderComponent();
+
+				await waitFor(() => {
+					expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+				});
+
+				const handler = ghosttyMockState.terminalInstances[0].customKeyEventHandler!;
+				expect(handler(makeKeyEvent({ key: 'a' }))).toBe(false);
+				expect(handler(makeKeyEvent({ key: 'Enter' }))).toBe(false);
+			});
+
+			it('returns false for Ctrl+C (terminal control sequence)', async () => {
+				renderComponent();
+
+				await waitFor(() => {
+					expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+				});
+
+				const handler = ghosttyMockState.terminalInstances[0].customKeyEventHandler!;
+				expect(handler(makeKeyEvent({ key: 'c', ctrlKey: true }))).toBe(false);
+			});
+		});
+
+		describe('Option+Arrow word navigation (macOS)', () => {
+			beforeEach(() => {
+				(window as any).maestro.platform = 'darwin';
+				(window.maestro.process.write as ReturnType<typeof vi.fn>).mockReset().mockResolvedValue(true);
+			});
+
+			it('writes ESC b for Option+Left and returns true', async () => {
+				renderComponent({ sessionId: 'nav-session' });
+
+				await waitFor(() => {
+					expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+				});
+
+				const handler = ghosttyMockState.terminalInstances[0].customKeyEventHandler!;
+				const result = handler(makeKeyEvent({ key: 'ArrowLeft', altKey: true }));
+
+				expect(result).toBe(true);
+				expect(window.maestro.process.write).toHaveBeenCalledWith('nav-session', '\x1bb');
+			});
+
+			it('writes ESC f for Option+Right and returns true', async () => {
+				renderComponent({ sessionId: 'nav-session' });
+
+				await waitFor(() => {
+					expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+				});
+
+				const handler = ghosttyMockState.terminalInstances[0].customKeyEventHandler!;
+				const result = handler(makeKeyEvent({ key: 'ArrowRight', altKey: true }));
+
+				expect(result).toBe(true);
+				expect(window.maestro.process.write).toHaveBeenCalledWith('nav-session', '\x1bf');
+			});
+
+			it('does not intercept Option+ArrowUp/Down (lets Ghostty handle)', async () => {
+				renderComponent();
+
+				await waitFor(() => {
+					expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+				});
+
+				const handler = ghosttyMockState.terminalInstances[0].customKeyEventHandler!;
+				expect(handler(makeKeyEvent({ key: 'ArrowUp', altKey: true }))).toBe(false);
+				expect(handler(makeKeyEvent({ key: 'ArrowDown', altKey: true }))).toBe(false);
+			});
+		});
+
+		describe('non-macOS (Linux/Windows)', () => {
+			beforeEach(() => {
+				(window as any).maestro.platform = 'linux';
+			});
+
+			it('returns true for Meta (Super) key combos', async () => {
+				renderComponent();
+
+				await waitFor(() => {
+					expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+				});
+
+				const handler = ghosttyMockState.terminalInstances[0].customKeyEventHandler!;
+				expect(handler(makeKeyEvent({ key: 't', metaKey: true }))).toBe(true);
+			});
+
+			it('returns true for Ctrl+Shift combos (Maestro shortcuts)', async () => {
+				renderComponent();
+
+				await waitFor(() => {
+					expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+				});
+
+				const handler = ghosttyMockState.terminalInstances[0].customKeyEventHandler!;
+				expect(handler(makeKeyEvent({ key: '[', ctrlKey: true, shiftKey: true }))).toBe(true);
+			});
+
+			it('returns true for Ctrl+Alt combos (Maestro shortcuts)', async () => {
+				renderComponent();
+
+				await waitFor(() => {
+					expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+				});
+
+				const handler = ghosttyMockState.terminalInstances[0].customKeyEventHandler!;
+				expect(handler(makeKeyEvent({ key: 's', ctrlKey: true, altKey: true }))).toBe(true);
+			});
+
+			it('returns false for plain Ctrl+key (terminal control)', async () => {
+				renderComponent();
+
+				await waitFor(() => {
+					expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+				});
+
+				const handler = ghosttyMockState.terminalInstances[0].customKeyEventHandler!;
+				expect(handler(makeKeyEvent({ key: 'c', ctrlKey: true }))).toBe(false);
+				expect(handler(makeKeyEvent({ key: 'd', ctrlKey: true }))).toBe(false);
+			});
 		});
 	});
 });
