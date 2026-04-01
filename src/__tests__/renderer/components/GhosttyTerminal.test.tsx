@@ -444,4 +444,65 @@ describe('GhosttyTerminal', () => {
 			expect(terminal.options.theme.brightCyan).toBe(lightTheme.colors.textMain);
 		});
 	});
+
+	describe('search no-op behavior', () => {
+		it('returns false for search, searchNext, and searchPrevious', async () => {
+			const ref = React.createRef<TerminalEngineHandle>();
+			renderComponent({}, ref);
+
+			await waitFor(() => {
+				expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+			});
+
+			expect(ref.current?.search('query')).toBe(false);
+			expect(ref.current?.searchNext()).toBe(false);
+			expect(ref.current?.searchPrevious()).toBe(false);
+		});
+
+		it('logs a one-time console.info on the first search invocation', async () => {
+			const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+			const ref = React.createRef<TerminalEngineHandle>();
+			renderComponent({}, ref);
+
+			await waitFor(() => {
+				expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+			});
+
+			// First call should log
+			ref.current?.search('test');
+			expect(infoSpy).toHaveBeenCalledTimes(1);
+			expect(infoSpy).toHaveBeenCalledWith(
+				'[GhosttyTerminal] Search is not yet supported by ghostty-web 0.4.0'
+			);
+
+			// Subsequent calls should not log again
+			ref.current?.searchNext();
+			ref.current?.searchPrevious();
+			ref.current?.search('another');
+			expect(infoSpy).toHaveBeenCalledTimes(1);
+
+			infoSpy.mockRestore();
+		});
+
+		it('logs once even when searchNext is called first', async () => {
+			const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+			const ref = React.createRef<TerminalEngineHandle>();
+			renderComponent({}, ref);
+
+			await waitFor(() => {
+				expect(ghosttyMockState.terminalInstances).toHaveLength(1);
+			});
+
+			ref.current?.searchNext();
+			expect(infoSpy).toHaveBeenCalledTimes(1);
+
+			ref.current?.searchPrevious();
+			ref.current?.search('query');
+			expect(infoSpy).toHaveBeenCalledTimes(1);
+
+			infoSpy.mockRestore();
+		});
+	});
 });

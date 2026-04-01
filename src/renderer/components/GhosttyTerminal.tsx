@@ -16,6 +16,8 @@ const DEFAULT_FONT_SIZE = 14;
 const INIT_FAILURE_MESSAGE =
 	'Ghostty terminal failed to initialize. Switch to xterm.js in Settings > Display.';
 
+let searchWarningLogged = false;
+
 let ghosttyInitPromise: Promise<void> | null = null;
 
 function ensureGhosttyInitialized(): Promise<void> {
@@ -244,9 +246,33 @@ export const GhosttyTerminal = forwardRef<TerminalEngineHandle, TerminalEnginePr
 				scrollToBottom: () => {
 					terminalRef.current?.scrollToBottom();
 				},
-				search: () => false,
-				searchNext: () => false,
-				searchPrevious: () => false,
+				search: () => {
+					if (!searchWarningLogged) {
+						searchWarningLogged = true;
+						console.info(
+							'[GhosttyTerminal] Search is not yet supported by ghostty-web 0.4.0'
+						);
+					}
+					return false;
+				},
+				searchNext: () => {
+					if (!searchWarningLogged) {
+						searchWarningLogged = true;
+						console.info(
+							'[GhosttyTerminal] Search is not yet supported by ghostty-web 0.4.0'
+						);
+					}
+					return false;
+				},
+				searchPrevious: () => {
+					if (!searchWarningLogged) {
+						searchWarningLogged = true;
+						console.info(
+							'[GhosttyTerminal] Search is not yet supported by ghostty-web 0.4.0'
+						);
+					}
+					return false;
+				},
 				getSelection: () => terminalRef.current?.getSelection() ?? '',
 				resize: () => {
 					fitTerminalToContainer();
