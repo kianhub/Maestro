@@ -25,6 +25,8 @@ export function DisplayTab({ theme }: DisplayTabProps) {
 		setFontFamily,
 		fontSize,
 		setFontSize,
+		terminalEngine,
+		setTerminalEngine,
 		terminalWidth,
 		setTerminalWidth,
 		maxLogBuffer,
@@ -128,6 +130,21 @@ export function DisplayTab({ theme }: DisplayTabProps) {
 					onChange={setFontSize}
 					theme={theme}
 				/>
+			</div>
+
+			{/* Terminal Engine */}
+			<div>
+				<div className="block text-xs font-bold opacity-70 uppercase mb-2">Terminal Engine</div>
+				<ToggleButtonGroup
+					options={[
+						{ value: 'xterm', label: 'xterm.js' },
+						{ value: 'ghostty', label: 'Ghostty (experimental)' },
+					]}
+					value={terminalEngine}
+					onChange={setTerminalEngine}
+					theme={theme}
+				/>
+				<p className="text-xs opacity-50 mt-2">Requires restarting terminal tabs to take effect.</p>
 			</div>
 
 			{/* Terminal Width */}

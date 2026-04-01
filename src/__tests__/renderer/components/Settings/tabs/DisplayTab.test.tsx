@@ -27,6 +27,7 @@ import type { Theme } from '../../../../../renderer/types';
 // --- Mock setters (module-level for assertion access) ---
 const mockSetFontFamily = vi.fn();
 const mockSetFontSize = vi.fn();
+const mockSetTerminalEngine = vi.fn();
 const mockSetTerminalWidth = vi.fn();
 const mockSetMaxLogBuffer = vi.fn();
 const mockSetMaxOutputLines = vi.fn();
@@ -49,6 +50,8 @@ vi.mock('../../../../../renderer/hooks/settings/useSettings', () => ({
 		setFontFamily: mockSetFontFamily,
 		fontSize: 14,
 		setFontSize: mockSetFontSize,
+		terminalEngine: 'xterm',
+		setTerminalEngine: mockSetTerminalEngine,
 		terminalWidth: 100,
 		setTerminalWidth: mockSetTerminalWidth,
 		maxLogBuffer: 5000,
@@ -580,6 +583,47 @@ describe('DisplayTab', () => {
 
 			const smallButton = screen.getByText('Small');
 			expect(smallButton).toHaveClass('ring-2');
+		});
+	});
+
+	// =========================================================================
+	// Terminal Engine
+	// =========================================================================
+
+	describe('Terminal Engine', () => {
+		it('should render Terminal Engine label and helper text', async () => {
+			render(<DisplayTab theme={mockTheme} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			expect(screen.getByText('Terminal Engine')).toBeInTheDocument();
+			expect(
+				screen.getByText('Requires restarting terminal tabs to take effect.')
+			).toBeInTheDocument();
+		});
+
+		it('should call setTerminalEngine when Ghostty is selected', async () => {
+			render(<DisplayTab theme={mockTheme} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			fireEvent.click(screen.getByRole('button', { name: 'Ghostty (experimental)' }));
+			expect(mockSetTerminalEngine).toHaveBeenCalledWith('ghostty');
+		});
+
+		it('should highlight the selected terminal engine', async () => {
+			mockUseSettingsOverrides = { terminalEngine: 'ghostty' };
+			render(<DisplayTab theme={mockTheme} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			expect(screen.getByRole('button', { name: 'Ghostty (experimental)' })).toHaveClass('ring-2');
 		});
 	});
 
@@ -1637,6 +1681,8 @@ describe('DisplayTab', () => {
 			expect(screen.getByText('Interface Font')).toBeInTheDocument();
 			// Font Size
 			expect(screen.getByText('Font Size')).toBeInTheDocument();
+			// Terminal Engine
+			expect(screen.getByText('Terminal Engine')).toBeInTheDocument();
 			// Terminal Width
 			expect(screen.getByText('Terminal Width (Columns)')).toBeInTheDocument();
 			// Max Log Buffer
